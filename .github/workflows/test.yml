@@ -32,8 +32,15 @@ jobs:
             "OK  $file"
           }
 
-      - name: 테스트
-        shell: ${{ matrix.shell }}
+      # shell 항목에는 matrix 값을 쓸 수 없어서 단계를 나눔
+      - name: 테스트 (Windows PowerShell 5.1)
+        if: matrix.shell == 'powershell'
+        shell: powershell
+        run: .\tests\Run-Tests.ps1
+
+      - name: 테스트 (PowerShell 7)
+        if: matrix.shell == 'pwsh'
+        shell: pwsh
         run: .\tests\Run-Tests.ps1
 
   linux:
