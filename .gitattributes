@@ -1,0 +1,5 @@
+# 해시(SHA256SUMS)가 바뀌지 않도록 줄바꿈 변환을 하지 않음
+*.ps1 -text
+*.cmd -text
+SHA256SUMS -text
+*.sh text eol=lf
