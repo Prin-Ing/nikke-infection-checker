@@ -1,0 +1,49 @@
+name: test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows (${{ matrix.shell }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # powershell = Windows 기본 PowerShell 5.1, pwsh = PowerShell 7
+        shell: [powershell, pwsh]
+    steps:
+      # 외부 액션은 태그가 아니라 커밋 SHA로 고정 (태그는 바꿔치기될 수 있음)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: SHA256SUMS 확인
+        shell: pwsh
+        run: |
+          foreach ($line in Get-Content SHA256SUMS) {
+            $hash, $file = $line -split '\s+', 2
+            $file = $file.TrimStart('*')
+            $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLower()
+            if ($actual -ne $hash) { throw "해시 불일치: $file (기대 $hash, 실제 $actual)" }
+            "OK  $file"
+          }
+
+      - name: 테스트
+        shell: ${{ matrix.shell }}
+        run: .\tests\Run-Tests.ps1
+
+  linux:
+    name: Linux (pwsh)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: SHA256SUMS 확인
+        run: sha256sum -c SHA256SUMS
+
+      - name: 테스트
+        run: pwsh -NoProfile -NonInteractive ./tests/Run-Tests.ps1

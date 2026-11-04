@@ -1,17 +1,23 @@
-# Check-NikkeInfection.ps1 판정 테스트
+﻿# Check-NikkeInfection.ps1 판정 테스트
 #
 # 임시 폴더에 가짜 Windows 사용자 폴더(AppData, Temp, NIKKE 설치 폴더)를 만들고,
 # 감염 흔적 "문자열"만 담은 가짜 파일을 심은 뒤 점검 도구의 판정(종료 코드)을 확인합니다.
 # 진짜 악성코드는 전혀 사용하지 않습니다.
 #
-# 실행: pwsh tests/Run-Tests.ps1
+# 실행: pwsh tests/Run-Tests.ps1   (Windows PowerShell 5.1: powershell -File tests\Run-Tests.ps1)
 #
 # 리눅스에서는 레지스트리, 네트워크, 디지털 서명 검사는 테스트되지 않습니다(Windows 전용 기능).
+# 레지스트리 테스트는 실제 HKCU를 건드리므로 CI(GitHub Actions 등, 환경변수 CI 설정)에서만 실행합니다.
 
 $ErrorActionPreference = 'Stop'
+# 점검 도구의 한글 출력을 제대로 읽기 위해 (Windows PowerShell 5.1 기본값은 영문 코드페이지)
+try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}
+
 $Checker = [IO.Path]::Combine($PSScriptRoot, '..', 'Check-NikkeInfection.ps1')
 $Pwsh = (Get-Process -Id $PID).Path
 $Hex64 = 'ab' * 32
+$OnWindows = [Environment]::OSVersion.Platform -eq 'Win32NT'
+$ClsidPath = 'HKCU:\Software\Classes\CLSID\{E77CC89B-7401-4C04-8CED-149DB35ADD04}'
 
 function New-FakeEnv([string]$Name) {
     $root = Join-Path ([IO.Path]::GetTempPath()) ("nikke-test-{0}-{1}" -f $Name, [guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -48,11 +54,17 @@ function Invoke-Checker($e) {
         $env:APPDATA = $e.AppData
         $env:LOCALAPPDATA = $e.LocalAppData
         $env:TEMP = $e.Temp
-        $env:SystemRoot = $e.SystemRoot
-        $env:USERPROFILE = $e.Root
-        $out = & $Pwsh -NoProfile -NonInteractive -File $Checker -NikkePath $e.Nikke -ReportPath $report *>&1
+        # Windows에서 SystemRoot를 바꾸면 PowerShell이 시작하지 못하므로 리눅스에서만 가짜 경로 사용
+        if (-not $OnWindows) {
+            $env:SystemRoot = $e.SystemRoot
+            $env:USERPROFILE = $e.Root
+        }
+        # PowerShell 5.1은 Stop 모드에서 외부 프로그램의 stderr 출력을 오류로 처리하므로 잠시 완화
+        $ErrorActionPreference = 'Continue'
+        $out = & $Pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $Checker -NikkePath $e.Nikke -ReportPath $report *>&1
         $code = $LASTEXITCODE
     } finally {
+        $ErrorActionPreference = 'Stop'
         foreach ($n in $names) { [Environment]::SetEnvironmentVariable($n, $saved[$n]) }
     }
     [pscustomobject]@{ Code = $code; Output = ($out | Out-String); Report = $report }
@@ -119,6 +131,36 @@ $Cases = @(
     } }
 )
 
+# ---------------------------------------------------------------------------
+# Windows 전용: 레지스트리 테스트 (CI에서만)
+# ---------------------------------------------------------------------------
+if ($OnWindows -and $env:CI) {
+    if (Test-Path -LiteralPath $ClsidPath) {
+        throw "이미 $ClsidPath 키가 있습니다. 기존 키를 덮어쓰지 않도록 테스트를 중단합니다."
+    }
+    $RemoveClsid = { Remove-Item -LiteralPath $ClsidPath -Recurse -Force -ErrorAction SilentlyContinue }
+
+    $Cases += @{ Name = '레지스트리 COM 하이재킹'; Expect = 2; Contains = '자동 실행되도록 등록'; Cleanup = $RemoveClsid; Setup = {
+        param($e)
+        $dll = Join-Path $e.LocalAppData "Google\Chrome\User Data\PlatformExperienceHelper\$Hex64\platform_experience_helper.dll"
+        New-Item -Path "$ClsidPath\InprocServer32" -Force | Out-Null
+        Set-Item -LiteralPath "$ClsidPath\InprocServer32" -Value $dll
+    } }
+
+    $Cases += @{ Name = '빈 CLSID 키만 남음'; Expect = 1; Contains = '빈 CLSID 키'; Cleanup = $RemoveClsid; Setup = {
+        param($e)
+        New-Item -Path $ClsidPath -Force | Out-Null
+    } }
+
+    $Cases += @{ Name = '시스템 폴더를 가리키는 CLSID'; Expect = 3; Contains = '재정의'; Cleanup = $RemoveClsid; Setup = {
+        param($e)
+        New-Item -Path "$ClsidPath\InprocServer32" -Force | Out-Null
+        Set-Item -LiteralPath "$ClsidPath\InprocServer32" -Value 'C:\Windows\System32\wpc.dll'
+    } }
+}
+
+Write-Host ("환경: PowerShell {0} / {1}" -f $PSVersionTable.PSVersion, [Environment]::OSVersion.VersionString)
+
 $failed = 0
 foreach ($c in $Cases) {
     $e = New-FakeEnv 'case'
@@ -138,6 +180,7 @@ foreach ($c in $Cases) {
             Write-Host ($r.Output -split "`n" | ForEach-Object { "      | $_" } | Out-String)
         }
     } finally {
+        if ($c.Cleanup) { & $c.Cleanup }
         Remove-Item -Recurse -Force -Path $e.Root -ErrorAction SilentlyContinue
     }
 }

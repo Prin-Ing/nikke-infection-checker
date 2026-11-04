@@ -1,5 +1,7 @@
 # NIKKE PC 런처 악성코드 감염 점검 도구
 
+[![test](https://github.com/Prin-Ing/nikke-infection-checker/actions/workflows/test.yml/badge.svg)](https://github.com/Prin-Ing/nikke-infection-checker/actions/workflows/test.yml)
+
 2026년 9~11월에 NIKKE PC 런처를 통해 퍼진 원격제어/정보탈취 악성코드(insightjs, k2f 에이전트)에
 감염됐는지 확인하는 Windows용 도구입니다. **읽기 전용**이라 아무것도 수정하거나 삭제하지 않습니다.
 
@@ -71,6 +73,9 @@ bash tests/run-linux.sh
 
 공식 PowerShell을 내려받아 **SHA256을 검증한 뒤에만** 실행하고, 해시가 다르면 파일을 지우고 중단합니다.
 레지스트리, 네트워크, 디지털 서명 검사는 Windows 전용이라 리눅스 테스트에서는 빠집니다.
+
+GitHub에 올리면 GitHub Actions가 자동으로 Windows PowerShell 5.1, PowerShell 7(Windows), 리눅스에서
+테스트를 돌립니다. Windows에서는 레지스트리 자동 실행 등록 테스트도 함께 합니다.
 
 파일을 고친 뒤에는 해시를 다시 만드세요:
 
